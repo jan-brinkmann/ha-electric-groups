@@ -1,0 +1,116 @@
+{
+  "title": "Electric Groups",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Electric Groups",
+        "description": "Richte Electric Groups ein. Anschließend kannst du auf der Integrationsseite deine Gruppen anlegen."
+      }
+    }
+  },
+  "config_subentries": {
+    "sum": {
+      "entry_type": "Elektrische Summengruppe",
+      "initiate_flow": {
+        "user": "Summengruppe hinzufügen",
+        "reconfigure": "Summengruppe bearbeiten"
+      },
+      "step": {
+        "user": {
+          "title": "Summengruppe hinzufügen",
+          "description": "Füge Geräte hinzu oder wähle einzelne Sensoren aus. Ein Gerät bringt alle seine aktivierten, kompatiblen Energie- und Leistungssensoren ein.",
+          "data": {
+            "name": "Gruppenname",
+            "devices": "Geräte",
+            "energy_entities": "Energiesensoren",
+            "power_entities": "Leistungssensoren",
+            "import_history": "Energiehistorie übernehmen"
+          },
+          "data_description": {
+            "import_history": "Verrechnet die bereits aufgezeichneten Energiestatistiken der ausgewählten Mitglieder."
+          }
+        },
+        "reconfigure": {
+          "title": "Summengruppe bearbeiten",
+          "description": "Füge Geräte hinzu oder wähle einzelne Sensoren aus. Ein Gerät bringt alle seine aktivierten, kompatiblen Energie- und Leistungssensoren ein.",
+          "data": {
+            "name": "Gruppenname",
+            "devices": "Geräte",
+            "energy_entities": "Energiesensoren",
+            "power_entities": "Leistungssensoren"
+          }
+        }
+      },
+      "error": {
+        "cyclic_group": "Durch diese Auswahl würde die Gruppe von sich selbst abhängen.",
+        "device_without_sensors": "Ein ausgewähltes Gerät hat keinen aktivierten, kompatiblen Energie- oder Leistungssensor.",
+        "empty_name": "Gib einen Namen für die Gruppe ein.",
+        "invalid_sensor": "Wähle einen aktivierten Sensor mit passender Geräteklasse und Einheit.",
+        "select_members": "Wähle mindestens ein kompatibles Gerät oder einen kompatiblen Sensor als Mitglied aus.",
+        "history_requires_energy": "Für den Import muss die Gruppe mindestens eine Energieentität enthalten.",
+        "history_requires_recorder": "Richte Recorder ein, bevor du Energiestatistiken importierst."
+      }
+    },
+    "difference": {
+      "entry_type": "Elektrische Differenzgruppe",
+      "initiate_flow": {
+        "user": "Differenzgruppe hinzufügen",
+        "reconfigure": "Differenzgruppe bearbeiten"
+      },
+      "step": {
+        "user": {
+          "title": "Differenzgruppe hinzufügen",
+          "description": "Wähle ein Basisgerät mit genau einem aktivierten, kompatiblen Energiesensor. Wähle danach die Geräte oder Sensoren, deren Messwerte du abziehen möchtest. Die Gruppe berechnet Leistung nur, wenn das Basisgerät auch Leistung misst.",
+          "data": {
+            "name": "Gruppenname",
+            "devices": "Abzuziehende Geräte",
+            "energy_entities": "Abzuziehende Energiesensoren",
+            "power_entities": "Abzuziehende Leistungssensoren",
+            "base_device": "Basisgerät",
+            "import_history": "Energiehistorie übernehmen"
+          },
+          "data_description": {
+            "import_history": "Verrechnet die bereits aufgezeichneten Energiestatistiken der ausgewählten Mitglieder."
+          }
+        },
+        "reconfigure": {
+          "title": "Differenzgruppe bearbeiten",
+          "description": "Wähle ein Basisgerät mit genau einem aktivierten, kompatiblen Energiesensor. Wähle danach die Geräte oder Sensoren, deren Messwerte du abziehen möchtest. Die Gruppe berechnet Leistung nur, wenn das Basisgerät auch Leistung misst.",
+          "data": {
+            "name": "Gruppenname",
+            "devices": "Abzuziehende Geräte",
+            "energy_entities": "Abzuziehende Energiesensoren",
+            "power_entities": "Abzuziehende Leistungssensoren",
+            "base_device": "Basisgerät"
+          }
+        }
+      },
+      "error": {
+        "cyclic_group": "Durch diese Auswahl würde die Gruppe von sich selbst abhängen.",
+        "device_without_sensors": "Ein ausgewähltes Gerät hat keinen aktivierten, kompatiblen Energie- oder Leistungssensor.",
+        "empty_name": "Gib einen Namen für die Gruppe ein.",
+        "invalid_sensor": "Wähle einen aktivierten Sensor mit passender Geräteklasse und Einheit.",
+        "select_members": "Wähle mindestens ein Gerät oder einen Sensor, dessen Messwerte die Gruppe abziehen kann.",
+        "history_requires_energy": "Für den Import muss die Gruppe mindestens eine Energieentität enthalten.",
+        "history_requires_recorder": "Richte Recorder ein, bevor du Energiestatistiken importierst.",
+        "base_device_requires_one_energy_sensor": "Das Basisgerät muss genau einen aktivierten, kompatiblen Energiesensor haben.",
+        "overlapping_base": "Ein Basissensor darf nicht gleichzeitig als Mitglied abgezogen werden."
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "energy": {
+        "name": "Energie"
+      },
+      "power": {
+        "name": "Leistung"
+      }
+    },
+    "switch": {
+      "require_all_measurement_sources": {
+        "name": "Alle Entitäten erforderlich"
+      }
+    }
+  }
+}

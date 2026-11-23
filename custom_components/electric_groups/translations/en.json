@@ -1,0 +1,116 @@
+{
+  "title": "Electric Groups",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Electric Groups",
+        "description": "Set up Electric Groups. You can create your groups on the integration page."
+      }
+    }
+  },
+  "config_subentries": {
+    "sum": {
+      "entry_type": "Electrical sum group",
+      "initiate_flow": {
+        "user": "Add sum group",
+        "reconfigure": "Edit sum group"
+      },
+      "step": {
+        "user": {
+          "title": "Add sum group",
+          "description": "Add devices or select individual sensors. A device contributes all of its enabled, compatible energy and power sensors.",
+          "data": {
+            "name": "Group name",
+            "devices": "Devices",
+            "energy_entities": "Energy sensors",
+            "power_entities": "Power sensors",
+            "import_history": "Import energy history"
+          },
+          "data_description": {
+            "import_history": "Combine the energy statistics already recorded for the selected members."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit sum group",
+          "description": "Add devices or select individual sensors. A device contributes all of its enabled, compatible energy and power sensors.",
+          "data": {
+            "name": "Group name",
+            "devices": "Devices",
+            "energy_entities": "Energy sensors",
+            "power_entities": "Power sensors"
+          }
+        }
+      },
+      "error": {
+        "cyclic_group": "This selection makes the group depend on itself.",
+        "device_without_sensors": "A selected device has no enabled, compatible energy or power sensor.",
+        "empty_name": "Enter a name for the group.",
+        "invalid_sensor": "Select an enabled sensor with a supported device class and unit.",
+        "select_members": "Select at least one compatible member device or sensor.",
+        "history_requires_energy": "The group needs at least one energy entity to import history.",
+        "history_requires_recorder": "Set up Recorder before importing energy statistics."
+      }
+    },
+    "difference": {
+      "entry_type": "Electrical difference group",
+      "initiate_flow": {
+        "user": "Add difference group",
+        "reconfigure": "Edit difference group"
+      },
+      "step": {
+        "user": {
+          "title": "Add difference group",
+          "description": "Choose a base device with exactly one enabled, compatible energy sensor. Then select the devices or sensors whose readings to subtract. The group calculates power only if the base device also measures power.",
+          "data": {
+            "name": "Group name",
+            "devices": "Devices to subtract",
+            "energy_entities": "Energy sensors to subtract",
+            "power_entities": "Power sensors to subtract",
+            "base_device": "Base device",
+            "import_history": "Import energy history"
+          },
+          "data_description": {
+            "import_history": "Combine the energy statistics already recorded for the selected members."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit difference group",
+          "description": "Choose a base device with exactly one enabled, compatible energy sensor. Then select the devices or sensors whose readings to subtract. The group calculates power only if the base device also measures power.",
+          "data": {
+            "name": "Group name",
+            "devices": "Devices to subtract",
+            "energy_entities": "Energy sensors to subtract",
+            "power_entities": "Power sensors to subtract",
+            "base_device": "Base device"
+          }
+        }
+      },
+      "error": {
+        "cyclic_group": "This selection makes the group depend on itself.",
+        "device_without_sensors": "A selected device has no enabled, compatible energy or power sensor.",
+        "empty_name": "Enter a name for the group.",
+        "invalid_sensor": "Select an enabled sensor with a supported device class and unit.",
+        "select_members": "Select at least one device or sensor whose readings the group can subtract.",
+        "history_requires_energy": "The group needs at least one energy entity to import history.",
+        "history_requires_recorder": "Set up Recorder before importing energy statistics.",
+        "base_device_requires_one_energy_sensor": "The base device must have exactly one enabled, compatible energy sensor.",
+        "overlapping_base": "A base sensor cannot also be a subtracted member."
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "energy": {
+        "name": "Energy"
+      },
+      "power": {
+        "name": "Power"
+      }
+    },
+    "switch": {
+      "require_all_measurement_sources": {
+        "name": "Require all entities"
+      }
+    }
+  }
+}

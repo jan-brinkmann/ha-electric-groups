@@ -1,0 +1,20 @@
+{
+  "domain": "electric_groups",
+  "name": "Electric Groups",
+  "categories": [
+    "energy.meters_monitoring"
+  ],
+  "codeowners": [
+    "@jan-brinkmann"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "recorder"
+  ],
+  "documentation": "https://github.com/jan-brinkmann/ha-electric-groups",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/jan-brinkmann/ha-electric-groups/issues",
+  "single_config_entry": true,
+  "version": "1.0.0"
+}
