@@ -14,25 +14,39 @@ from homeassistant.components.recorder.models import (
     StatisticMetaData,
 )
 from homeassistant.components.recorder.statistics import statistics_during_period
+from homeassistant.components.repairs import DOMAIN as REPAIRS_DOMAIN
+from homeassistant.components.repairs import repairs_flow_manager
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import (
     ATTR_DEVICE_CLASS,
     ATTR_UNIT_OF_MEASUREMENT,
     CONF_NAME,
+    EVENT_STATE_CHANGED,
     STATE_OFF,
     STATE_ON,
     STATE_UNAVAILABLE,
     UnitOfEnergy,
     UnitOfPower,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.translation import (
+    async_get_cached_translations,
+    async_get_translations,
+    async_invalidate_translations,
+)
+from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant.common import MockConfigEntry
+from pytest_homeassistant.common import (
+    MockConfigEntry,
+    async_capture_events,
+    async_fire_time_changed,
+)
 from pytest_homeassistant.components.recorder.common import (
     async_wait_recording_done,
     do_adhoc_statistics,
@@ -50,6 +64,7 @@ from custom_components.electric_groups.const import (
     DOMAIN,
     GROUP_DIFFERENCE,
     GROUP_SUM,
+    ISSUE_PENDING_ENERGY_REPORTS,
 )
 from custom_components.electric_groups.statistics import History, write_history
 
@@ -320,6 +335,257 @@ async def test_existing_sum_group_gets_availability_switch(
     )
     assert_value(hass, energy_id, 4)
     assert_value(hass, power_id, 100)
+
+
+@pytest.mark.parametrize(
+    ("group_type", "total"), [(GROUP_SUM, 4), (GROUP_DIFFERENCE, 2)]
+)
+async def test_pending_energy_reports_repair(
+    recorder_mock: Recorder, hass: HomeAssistant, group_type: str, total: float
+) -> None:
+    """Confirm energy recovery without publishing an incomplete power reading."""
+    assert await async_setup_component(hass, REPAIRS_DOMAIN, {})
+    entry = await create_integration(hass)
+    base, member = "sensor.main_energy", "sensor.load_energy"
+    base_power, member_power = "sensor.main_power", "sensor.load_power"
+    idle = "sensor.idle_energy"
+    load_device = register_meter_device(hass, "load", "load_energy")
+    er.async_get(hass).async_update_entity(member, name="Meter [Office]")
+    data = {
+        CONF_NAME: "Office",
+        CONF_POWER_ENTITIES: [member_power],
+        CONF_ENERGY_ENTITIES: [member, idle, base]
+        if group_type == GROUP_SUM
+        else [member, idle],
+    }
+    if group_type == GROUP_DIFFERENCE:
+        data[CONF_BASE_DEVICE] = register_meter_device(
+            hass, "base", "main_energy", "main_power"
+        )
+        set_power(hass, base_power, 100)
+    set_energy(hass, base, 100)
+    set_energy(hass, member, 40)
+    set_energy(hass, idle, 7)
+    set_power(hass, member_power, 30)
+    result = await submit_group(hass, entry, group_type, data)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    (group_id,) = entry.subentries
+    issue_id = f"{ISSUE_PENDING_ENERGY_REPORTS}_{group_id}"
+    issues = ir.async_get(hass)
+    energy_id = "sensor.office_energy"
+    power_id = "sensor.office_power"
+    switch_id = "switch.office_require_all_entities"
+    assert_value(hass, power_id, 30 if group_type == GROUP_SUM else 70)
+    set_power(hass, member_power, STATE_UNAVAILABLE)
+    assert_unavailable(hass, power_id)
+
+    set_energy(hass, member, STATE_UNAVAILABLE)
+    set_energy(hass, base, 103)
+    assert_unavailable(hass, energy_id)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
+    assert issues.async_get_issue(DOMAIN, issue_id) is None
+
+    set_energy(hass, member, 41)
+    assert_unavailable(hass, energy_id)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=58))
+    assert issues.async_get_issue(DOMAIN, issue_id) is None
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
+    issue = issues.async_get_issue(DOMAIN, issue_id)
+    assert issue is not None and issue.is_fixable
+    assert issue.translation_placeholders == {
+        "group": "Office",
+        "entities": f"{idle}, {member}, {base}",
+    }
+
+    set_energy(hass, base, 103)
+    updated_issue = issues.async_get_issue(DOMAIN, issue_id)
+    assert updated_issue is not None and updated_issue.created == issue.created
+    assert updated_issue.translation_placeholders == {
+        "group": "Office",
+        "entities": f"{idle}, {member}",
+    }
+
+    events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    manager = repairs_flow_manager(hass)
+    assert manager is not None
+    result = await manager.async_init(DOMAIN, context={"issue_id": issue_id})
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "confirm"
+    entity_links = (
+        f"- `{idle}`\n"
+        f"- [Meter \\[Office\\] (`{member}`)](/config/devices/device/{load_device})"
+    )
+    placeholders = {
+        "group": "Office",
+        "group_name": "Office",
+        "entities": entity_links,
+    }
+    assert result["description_placeholders"] == placeholders
+    flow_key = f"component.{DOMAIN}.issues.{updated_issue.translation_key}.fix_flow"
+    prefix = f"{flow_key}.step.{result['step_id']}"
+    for language, button in (("de", "Reparieren"), ("en", "Repair")):
+        translations = await async_get_translations(hass, language, "issues", [DOMAIN])
+        assert "Office" in translations[f"{prefix}.title"].format_map(placeholders)
+        description = translations[f"{prefix}.description"].format_map(placeholders)
+        assert entity_links in description
+        assert "Office" in description
+        assert translations[f"{prefix}.submit"] == button
+    assert_unavailable(hass, energy_id)
+
+    manager.async_abort(result["flow_id"])
+    assert issues.async_get_issue(DOMAIN, issue_id) == updated_issue
+    assert_unavailable(hass, energy_id)
+    assert all(event.data["entity_id"] != switch_id for event in events)
+
+    result = await manager.async_init(DOMAIN, context={"issue_id": issue_id})
+    assert result["type"] is FlowResultType.FORM
+    result = await manager.async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["description_placeholders"] == {"group_name": "Office"}
+    for language, expected in (
+        ("de", "Die Energie-Entität der Gruppe Office ist wieder verfügbar."),
+        ("en", "The energy entity for the Office group is available again."),
+    ):
+        translations = await async_get_translations(hass, language, "issues", [DOMAIN])
+        message = translations[f"{flow_key}.create_entry.default"].format_map(
+            result["description_placeholders"]
+        )
+        assert message == expected
+    assert issues.async_get_issue(DOMAIN, issue_id) is None
+    assert_value(hass, energy_id, total)
+    assert_unavailable(hass, power_id)
+    assert all(event.data["entity_id"] not in {power_id, switch_id} for event in events)
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert_value(hass, energy_id, total)
+    assert_unavailable(hass, power_id)
+    switch = hass.states.get(switch_id)
+    assert switch is not None and switch.state == STATE_ON
+    set_energy(hass, member, STATE_UNAVAILABLE)
+    assert_unavailable(hass, energy_id)
+
+
+async def test_reload_refreshes_cached_repair_translations(
+    recorder_mock: Recorder, hass: HomeAssistant
+) -> None:
+    """After a reload, serve repair texts added since the cache was populated."""
+    entry = await create_integration(hass)
+    async_invalidate_translations(hass, {DOMAIN})
+    with patch(
+        "homeassistant.helpers.translation._load_translations_files_by_language",
+        return_value={},
+    ):
+        assert await async_get_translations(hass, "de", "issues", [DOMAIN]) == {}
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    translations = await async_get_translations(hass, "de", "issues", [DOMAIN])
+    prefix = f"component.{DOMAIN}.issues.{ISSUE_PENDING_ENERGY_REPORTS}.fix_flow.step"
+    assert "{entities}" in translations[f"{prefix}.confirm.description"]
+    assert translations[f"{prefix}.confirm.submit"] == "Reparieren"
+
+
+async def test_pending_energy_repair_waits_for_home_assistant_startup(
+    recorder_mock: Recorder, hass: HomeAssistant
+) -> None:
+    """Restore a waiting group and publish its repair after startup."""
+    assert await async_setup_component(hass, REPAIRS_DOMAIN, {})
+    entry = await create_integration(hass)
+    meter = "sensor.load_energy"
+    set_energy(hass, meter, 10)
+    result = await submit_group(
+        hass, entry, GROUP_SUM, {CONF_NAME: "Office", CONF_ENERGY_ENTITIES: [meter]}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    (group_id,) = entry.subentries
+    issue_id = f"{ISSUE_PENDING_ENERGY_REPORTS}_{group_id}"
+    issues = ir.async_get(hass)
+
+    set_energy(hass, meter, STATE_UNAVAILABLE)
+    set_energy(hass, meter, 10)
+    hass.set_state(CoreState.starting)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    prefix = f"component.{DOMAIN}.issues.{ISSUE_PENDING_ENERGY_REPORTS}.fix_flow.step"
+    cached = async_get_cached_translations(hass, hass.config.language, "issues", DOMAIN)
+    assert f"{prefix}.confirm.description" in cached
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
+    assert_unavailable(hass, "sensor.office_energy")
+    assert issues.async_get_issue(DOMAIN, issue_id) is None
+
+    await hass.async_start()
+    assert issues.async_get_issue(DOMAIN, issue_id) is None
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
+    assert issues.async_get_issue(DOMAIN, issue_id) is not None
+
+    manager = repairs_flow_manager(hass)
+    assert manager is not None
+    form = await manager.async_init(DOMAIN, context={"issue_id": issue_id})
+    assert form["type"] is FlowResultType.FORM
+    resources = await async_get_translations(hass, "de", "issues")
+    description = resources[f"{prefix}.{form['step_id']}.description"].format_map(
+        form["description_placeholders"]
+    )
+    assert meter in description
+    assert "Office" in description
+    manager.async_abort(form["flow_id"])
+
+
+async def test_pending_energy_reports_repair_cleanup(
+    recorder_mock: Recorder, hass: HomeAssistant
+) -> None:
+    """Clear resolved issues and reject confirmation of a superseded outage."""
+    assert await async_setup_component(hass, REPAIRS_DOMAIN, {})
+    manager = repairs_flow_manager(hass)
+    assert manager is not None
+    entry = await create_integration(hass)
+    member = "sensor.load_energy"
+    set_energy(hass, member, 10)
+    result = await submit_group(
+        hass, entry, GROUP_SUM, {CONF_NAME: "Office", CONF_ENERGY_ENTITIES: [member]}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    (group_id,) = entry.subentries
+    issue_id = f"{ISSUE_PENDING_ENERGY_REPORTS}_{group_id}"
+    issues = ir.async_get(hass)
+
+    set_energy(hass, member, STATE_UNAVAILABLE)
+    set_energy(hass, member, 10)
+    set_energy(hass, member, 10)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
+    assert issues.async_get_issue(DOMAIN, issue_id) is None
+
+    set_energy(hass, member, STATE_UNAVAILABLE)
+    set_energy(hass, member, 10)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
+    assert issues.async_get_issue(DOMAIN, issue_id) is not None
+    set_energy(hass, member, 10)
+    assert issues.async_get_issue(DOMAIN, issue_id) is None
+    assert_value(hass, "sensor.office_energy", 0)
+
+    set_energy(hass, member, STATE_UNAVAILABLE)
+    set_energy(hass, member, 10)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
+    assert issues.async_get_issue(DOMAIN, issue_id) is not None
+    form = await manager.async_init(DOMAIN, context={"issue_id": issue_id})
+    assert form["type"] is FlowResultType.FORM
+    set_energy(hass, member, STATE_UNAVAILABLE)
+    assert issues.async_get_issue(DOMAIN, issue_id) is None
+
+    set_energy(hass, member, 10)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
+    assert issues.async_get_issue(DOMAIN, issue_id) is not None
+    stale_result = await manager.async_configure(form["flow_id"], {})
+    assert stale_result["type"] is FlowResultType.ABORT
+    assert stale_result["reason"] == "no_longer_applicable"
+    assert issues.async_get_issue(DOMAIN, issue_id) is not None
+    assert_unavailable(hass, "sensor.office_energy")
+    assert hass.config_entries.async_remove_subentry(entry, group_id)
+    await hass.async_block_till_done()
+    assert issues.async_get_issue(DOMAIN, issue_id) is None
 
 
 async def test_difference_power_requires_available_base_reading(

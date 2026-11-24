@@ -98,6 +98,26 @@
       }
     }
   },
+  "issues": {
+    "pending_energy_reports": {
+      "title": "{group} is waiting for energy readings from {entities}.",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Restore the energy sensor for {group}",
+            "description": "All energy entities are available again. The following entities still need to report their meter readings.\n\n{entities}\n\nCheck the displayed energy readings before selecting Repair. The repair uses these readings to make the energy entity for the {group_name} group available again.\n\nIf you close this dialog, the group energy sensor will keep waiting for reports.",
+            "submit": "Repair"
+          }
+        },
+        "abort": {
+          "no_longer_applicable": "This repair no longer applies to the group."
+        },
+        "create_entry": {
+          "default": "The energy entity for the {group_name} group is available again."
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "energy": {

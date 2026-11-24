@@ -15,6 +15,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigSubentry
 from homeassistant.core import (
+    CoreState,
     Event,
     EventStateReportedData,
     HomeAssistant,
@@ -23,6 +24,7 @@ from homeassistant.core import (
 )
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -40,7 +42,9 @@ from . import ElectricGroupsEntry, GroupStorage, availability_signal, group_devi
 from .const import (
     CONF_IMPORT_HISTORY,
     CONF_SOURCES,
+    DOMAIN,
     GROUP_DIFFERENCE,
+    ISSUE_PENDING_ENERGY_REPORTS,
     MEASUREMENTS,
 )
 from .energy import EnergyAccumulator
@@ -49,6 +53,7 @@ from .statistics import async_recorder_job, prepare_history, write_history
 
 _LOGGER = logging.getLogger(__name__)
 _HISTORY_RETRY_DELAY = 60
+_ENERGY_REPAIR_DELAY = 60
 
 
 async def async_setup_entry(
@@ -204,10 +209,14 @@ class GroupEnergySensor(GroupSensor):
             group, device_info, SensorDeviceClass.ENERGY, entry.runtime_data
         )
         self._entry = entry
+        self._group_name = group.title
         self._accumulator = EnergyAccumulator()
         self._base_entity_ids: set[str] = set()
         self._history_task: Task[None] | None = None
         self._cancel_retry: Callable[[], None] | None = None
+        self._repair_issue_id = f"{ISSUE_PENDING_ENERGY_REPORTS}_{self._group_id}"
+        self._repair_entity_ids: tuple[str, ...] = ()
+        self._cancel_repair_check: Callable[[], None] | None = None
         stored = self._storage.states.get(self._group_id)
         self._waiting_for_history = bool(
             self._weights
@@ -218,11 +227,103 @@ class GroupEnergySensor(GroupSensor):
             self._accumulator.restore(stored, self._weights)
 
     async def async_added_to_hass(self) -> None:
-        """Defer any pending statistics import until Home Assistant starts."""
+        """Register recovery and defer repair checks and history until startup."""
         await super().async_added_to_hass()
+        self._storage.energy_recovery_callbacks[self._group_id] = (
+            self._async_resume_energy
+        )
+        self.async_on_remove(self._async_remove_repair)
+        self.async_on_remove(async_at_started(self.hass, self._async_update_repair))
         if self._waiting_for_history:
             self.async_on_remove(self._async_cancel_import)
             self.async_on_remove(async_at_started(self.hass, self._async_start_import))
+
+    @property
+    def _waiting_for_reports(self) -> bool:
+        """Return whether strict mode is waiting for reports from online meters."""
+        return (
+            self._require_all_sources
+            and self._accumulator.all_sources_available is True
+            and bool(self._accumulator.pending_reports)
+        )
+
+    @property
+    def _pending_entity_ids(self) -> tuple[str, ...]:
+        """Return the sorted entity IDs still blocking recovery for online meters."""
+        return tuple(
+            sorted({self._source_ids[ref] for ref in self._accumulator.pending_reports})
+        )
+
+    @callback
+    def _async_resume_energy(self) -> bool:
+        """Resume energy with current readings and return whether it is available."""
+        if not self._waiting_for_reports:
+            return False
+        self._async_refresh(accept_current_readings=True)
+        if self.available:
+            self.async_write_ha_state()
+        return self.available
+
+    @callback
+    def _async_update_repair(self, hass: HomeAssistant) -> None:
+        """Schedule or refresh the repair once Home Assistant has started."""
+        if hass.state is not CoreState.running or not self._waiting_for_reports:
+            self._async_clear_repair()
+        elif self._repair_entity_ids:
+            self._async_publish_repair()
+        elif self._cancel_repair_check is None:
+            self._cancel_repair_check = async_call_later(
+                hass, _ENERGY_REPAIR_DELAY, self._async_create_repair
+            )
+
+    @callback
+    def _async_create_repair(self, _now: object) -> None:
+        """Publish the issue when the grace period expires while running."""
+        self._cancel_repair_check = None
+        if self.hass.state is CoreState.running:
+            self._async_publish_repair()
+
+    @callback
+    def _async_publish_repair(self) -> None:
+        """Create or update the issue when the list of blocking entities changes."""
+        pending_entity_ids = self._pending_entity_ids
+        if pending_entity_ids == self._repair_entity_ids:
+            return
+        self._repair_entity_ids = pending_entity_ids
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            self._repair_issue_id,
+            config_entry_id=self._entry.entry_id,
+            data={
+                "entry_id": self._entry.entry_id,
+                "group_id": self._group_id,
+                "entity_ids": " ".join(pending_entity_ids),
+            },
+            is_fixable=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_PENDING_ENERGY_REPORTS,
+            translation_placeholders={
+                "group": self._group_name,
+                "entities": ", ".join(pending_entity_ids),
+            },
+        )
+
+    @callback
+    def _async_clear_repair(self) -> None:
+        """Cancel the grace period or remove the active repair issue."""
+        if (cancel_check := self._cancel_repair_check) is not None:
+            self._cancel_repair_check = None
+            cancel_check()
+        if self._repair_entity_ids:
+            self._repair_entity_ids = ()
+            ir.async_delete_issue(self.hass, DOMAIN, self._repair_issue_id)
+
+    @callback
+    def _async_remove_repair(self) -> None:
+        """Remove the group's repair callback and issue when the sensor unloads."""
+        self._storage.energy_recovery_callbacks.pop(self._group_id, None)
+        self._async_clear_repair()
 
     @callback
     def _async_subscribe(self) -> None:
@@ -352,12 +453,17 @@ class GroupEnergySensor(GroupSensor):
 
     @callback
     def _async_refresh(
-        self, *, publish: bool = False, confirmed_entity_id: str | None = None
+        self,
+        *,
+        publish: bool = False,
+        confirmed_entity_id: str | None = None,
+        accept_current_readings: bool = False,
     ) -> None:
         """Track trusted meter deltas and wait for fresh readings in strict mode.
 
         Keep the last reliable reading for an unconfirmed source so a stale
         value after reconnecting cannot be mistaken for a meter reset.
+        Repair can accept current readings when every energy source is available.
         """
         if self._waiting_for_history:
             return
@@ -392,6 +498,7 @@ class GroupEnergySensor(GroupSensor):
             unavailable,
             require_all=require_all,
             confirmed_ref=confirmed_ref,
+            accept_current_readings=accept_current_readings,
         )
         for ref, (reading, increasing) in readings.items():
             if ref not in self._accumulator.pending_reports:
@@ -418,6 +525,7 @@ class GroupEnergySensor(GroupSensor):
 
         self._attr_available = bool(self._weights) and can_publish and value is not None
         self._attr_native_value = value if self._attr_available else None
+        self._async_update_repair(self.hass)
 
 
 class GroupPowerSensor(GroupSensor):
