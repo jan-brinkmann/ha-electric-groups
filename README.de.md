@@ -87,7 +87,7 @@ Geräte können vorübergehend nicht verfügbar sein, etwa wenn ein Cloud-Dienst
 
 Auf der Geräteseite jeder Gruppe findest du unter **Konfiguration** den Schalter **Alle Entitäten erforderlich**. Die Einstellung gilt für Energie und Leistung jeweils separat und wird für jede Gruppe gespeichert.
 
-- **Ein (Standard für neue Gruppen).** Ist eine Energie- oder Leistungsentität nicht verfügbar, wird der entsprechende Gruppensensor ebenfalls als nicht verfügbar angezeigt. Nach einem Ausfall zeigt der Energiesensor erst wieder einen Wert an, wenn alle Energieentitäten wieder verfügbar sind und danach jeweils einen Messwert gemeldet haben. Auch eine erneute Meldung mit demselben Zählerstand zählt.
+- **Ein (Standard für neue Gruppen).** Ist eine Energie- oder Leistungsentität nicht verfügbar, wird der entsprechende Gruppensensor ebenfalls als nicht verfügbar angezeigt. Nach einem Ausfall wartet der Energiesensor, bis alle Energieentitäten wieder verfügbar sind und danach jeweils einen Messwert melden. Eine erneute Meldung mit demselben Zählerstand zählt. Bleibt ein gültiger Zählerstand nach der Rückkehr aller Energieentitäten eine Minute lang unverändert, gilt er auch ohne weitere Meldung als bestätigt.
 - **Aus.** Die Gruppe rechnet mit den verfügbaren Messwerten. Meldet ein Energiezähler nach einem Ausfall wieder einen Wert, zählt die Gruppe ab seinem letzten gültigen Stand weiter. Fallen alle ausgewählten Leistungssensoren einer Summengruppe aus, zeigt sie 0 W. Eine Differenzgruppe braucht mindestens einen verfügbaren Basis-Leistungswert, um die Leistung anzuzeigen.
 
 ## Beispiel für das Energie-Dashboard

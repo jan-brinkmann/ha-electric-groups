@@ -87,7 +87,7 @@ Devices can become temporarily unavailable if a cloud service goes down or a wir
 
 On each group's device page, look under **Configuration** for **Require all entities**. The setting applies to energy and power separately and is saved for each group.
 
-- **On (default for new groups).** If an energy or power entity is unavailable, the corresponding group sensor is also shown as unavailable. After an outage, the energy sensor waits until all energy entities are available again and each has then reported a reading. A repeated report with the same meter value counts.
+- **On (default for new groups).** If an energy or power entity is unavailable, the corresponding group sensor is also shown as unavailable. After an outage, the energy sensor waits for each energy entity to report a reading after they are all available again. A repeated report with the same meter value counts. If a valid reading stays unchanged for one minute after all energy entities become available, it counts even without another report.
 - **Off.** The group uses the available readings. When an energy meter reports again after an outage, the group tracks changes from its last valid reading. A sum group shows 0 W if all selected power sensors are unavailable. A difference group needs at least one available base power reading to show power.
 
 ## Example for the Energy Dashboard

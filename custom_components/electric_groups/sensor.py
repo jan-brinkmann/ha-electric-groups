@@ -49,6 +49,7 @@ from .statistics import async_recorder_job, prepare_history, write_history
 
 _LOGGER = logging.getLogger(__name__)
 _HISTORY_RETRY_DELAY = 60
+_STABLE_READING_DELAY = 60
 
 
 async def async_setup_entry(
@@ -208,6 +209,7 @@ class GroupEnergySensor(GroupSensor):
         self._base_entity_ids: set[str] = set()
         self._history_task: Task[None] | None = None
         self._cancel_retry: Callable[[], None] | None = None
+        self._cancel_recovery_timeout: Callable[[], None] | None = None
         stored = self._storage.states.get(self._group_id)
         self._waiting_for_history = bool(
             self._weights
@@ -218,8 +220,9 @@ class GroupEnergySensor(GroupSensor):
             self._accumulator.restore(stored, self._weights)
 
     async def async_added_to_hass(self) -> None:
-        """Defer any pending statistics import until Home Assistant starts."""
+        """Tie the recovery timer and any pending statistics import to the entity."""
         await super().async_added_to_hass()
+        self.async_on_remove(self._async_cancel_recovery_timeout)
         if self._waiting_for_history:
             self.async_on_remove(self._async_cancel_import)
             self.async_on_remove(async_at_started(self.hass, self._async_start_import))
@@ -351,18 +354,56 @@ class GroupEnergySensor(GroupSensor):
         self._async_start_import(self.hass)
 
     @callback
-    def _async_refresh(
-        self, *, publish: bool = False, confirmed_entity_id: str | None = None
+    def _async_update_recovery_timer(
+        self, readings: dict[str, tuple[Reading, bool]], *, all_available: bool
     ) -> None:
-        """Track trusted meter deltas and wait for fresh readings in strict mode.
+        """Start a recovery timer when all meters are available and reports are due."""
+        pending = self._accumulator.pending_reports
+        if not all_available or not pending:
+            self._async_cancel_recovery_timeout()
+        elif self._cancel_recovery_timeout is None:
+            self._cancel_recovery_timeout = async_call_later(
+                self.hass,
+                _STABLE_READING_DELAY,
+                partial(
+                    self._async_recovery_timeout,
+                    {ref: readings[ref] for ref in pending},
+                ),
+            )
 
-        Keep the last reliable reading for an unconfirmed source so a stale
-        value after reconnecting cannot be mistaken for a meter reset.
+    @callback
+    def _async_cancel_recovery_timeout(self) -> None:
+        """Stop waiting on the current set of readings."""
+        if self._cancel_recovery_timeout is not None:
+            self._cancel_recovery_timeout()
+            self._cancel_recovery_timeout = None
+
+    @callback
+    def _async_recovery_timeout(
+        self, readings: dict[str, tuple[Reading, bool]], _now: object
+    ) -> None:
+        """Confirm meters that still show their readings from one minute ago."""
+        self._cancel_recovery_timeout = None
+        self._async_refresh(stable_readings=readings)
+        if self._attr_available:
+            self.async_write_ha_state()
+
+    @callback
+    def _async_refresh(
+        self,
+        *,
+        publish: bool = False,
+        confirmed_entity_id: str | None = None,
+        stable_readings: dict[str, tuple[Reading, bool]] | None = None,
+    ) -> None:
+        """Track meter deltas and confirm fresh reports or one-minute readings.
+
+        Keep the last reliable reading for each source until it is confirmed.
         """
         if self._waiting_for_history:
             return
         readings: dict[str, tuple[Reading, bool]] = {}
-        confirmed_ref = None
+        confirmed_refs: set[str] = set()
         for ref in self._weights:
             state = self._async_source_state(ref)
             if (
@@ -380,9 +421,15 @@ class GroupEnergySensor(GroupSensor):
                 confirmed_entity_id is not None
                 and self._source_ids.get(ref) == confirmed_entity_id
             ):
-                confirmed_ref = ref
+                confirmed_refs.add(ref)
 
         unavailable = self._weights.keys() - readings.keys()
+        if stable_readings is not None and not unavailable:
+            confirmed_refs.update(
+                ref
+                for ref, reading in stable_readings.items()
+                if readings.get(ref) == reading
+            )
         require_all = self._require_all_sources
         was_waiting = self._accumulator.all_sources_available is False or bool(
             self._accumulator.pending_reports
@@ -391,8 +438,9 @@ class GroupEnergySensor(GroupSensor):
             self._weights,
             unavailable,
             require_all=require_all,
-            confirmed_ref=confirmed_ref,
+            confirmed_refs=confirmed_refs,
         )
+        self._async_update_recovery_timer(readings, all_available=not unavailable)
         for ref, (reading, increasing) in readings.items():
             if ref not in self._accumulator.pending_reports:
                 changed |= self._accumulator.update(

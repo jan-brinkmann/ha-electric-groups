@@ -70,12 +70,12 @@ class EnergyAccumulator:
         unavailable: set[str],
         *,
         require_all: bool,
-        confirmed_ref: str | None,
+        confirmed_refs: set[str],
     ) -> bool:
-        """Track trusted readings and restart confirmation after a new outage.
+        """Update pending confirmations and return whether recovery state changed.
 
-        In strict mode, ignore a returning meter until it reports again.
-        Once all sources are available, wait for a fresh report from every
+        In strict mode, ignore a returning meter until its reading is confirmed.
+        Once all sources are available, require confirmation from every
         source after that point before exposing a group value.
         """
         complete = not unavailable
@@ -84,9 +84,7 @@ class EnergyAccumulator:
         elif complete and self.all_sources_available is False:
             pending = set(weights)
         else:
-            pending = self.pending_reports | unavailable
-            if confirmed_ref is not None:
-                pending.discard(confirmed_ref)
+            pending = (self.pending_reports | unavailable) - confirmed_refs
 
         changed = (
             self.all_sources_available != complete or self.pending_reports != pending

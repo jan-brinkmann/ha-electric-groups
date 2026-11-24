@@ -32,7 +32,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant.common import MockConfigEntry
+from pytest_homeassistant.common import MockConfigEntry, async_fire_time_changed
 from pytest_homeassistant.components.recorder.common import (
     async_wait_recording_done,
     do_adhoc_statistics,
@@ -663,6 +663,67 @@ async def test_difference_availability_switch(
     assert_unavailable(hass, power_id)
     set_power(hass, "sensor.main_power", 100)
     assert_value(hass, power_id, 65)
+
+
+@pytest.mark.parametrize("interruption", [None, "outage", "reload"])
+async def test_difference_recovers_without_another_energy_report(
+    recorder_mock: Recorder,
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    interruption: str | None,
+) -> None:
+    """Accept stable readings after one minute of continuous recovery observation."""
+    entry = await create_integration(hass)
+    base_device = register_meter_device(hass, "base", "main_energy")
+    base, member = "sensor.main_energy", "sensor.load_energy"
+    set_energy(hass, base, 100)
+    set_energy(hass, member, 40)
+    result = await submit_group(
+        hass,
+        entry,
+        GROUP_DIFFERENCE,
+        {
+            CONF_NAME: "Office",
+            CONF_BASE_DEVICE: base_device,
+            CONF_ENERGY_ENTITIES: [member],
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    energy_id = "sensor.office_energy"
+    assert_value(hass, energy_id, 0)
+
+    async def advance_time(seconds: int) -> None:
+        """Advance the test clock and run due Home Assistant callbacks."""
+        freezer.tick(timedelta(seconds=seconds))
+        async_fire_time_changed(hass)
+        await hass.async_block_till_done()
+
+    set_energy(hass, member, STATE_UNAVAILABLE)
+    set_energy(hass, base, 110)
+    await advance_time(120)
+    assert_unavailable(hass, energy_id)
+
+    set_energy(hass, member, 40)
+    assert_unavailable(hass, energy_id)
+    if interruption is not None:
+        await advance_time(30)
+        if interruption == "outage":
+            set_energy(hass, member, STATE_UNAVAILABLE)
+            set_energy(hass, member, 40)
+        else:
+            assert await hass.config_entries.async_reload(entry.entry_id)
+            await hass.async_block_till_done()
+        await advance_time(30)
+        assert_unavailable(hass, energy_id)
+
+    await advance_time(29 if interruption else 59)
+    assert_unavailable(hass, energy_id)
+    await advance_time(1)
+    assert_value(hass, energy_id, 10)
+
+    set_energy(hass, member, 42)
+    set_energy(hass, base, 111)
+    assert_value(hass, energy_id, 9)
 
 
 @pytest.mark.parametrize(
