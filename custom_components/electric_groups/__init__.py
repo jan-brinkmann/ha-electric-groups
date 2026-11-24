@@ -1,6 +1,7 @@
 """Provide virtual electricity meters configured as Home Assistant subentries."""
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import Platform
@@ -8,6 +9,10 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.translation import (
+    async_invalidate_translations,
+    async_load_integrations,
+)
 
 from .const import CONF_REQUIRE_ALL_SOURCES_DEFAULT, DOMAIN, GROUP_DIFFERENCE, NAME
 from .energy import EnergyState
@@ -18,12 +23,15 @@ _SAVE_DELAY = 10
 
 @dataclass
 class GroupStorage:
-    """Share persistent meter checkpoints and availability settings."""
+    """Share meter checkpoints, availability settings, and live repair callbacks."""
 
     store: Store[dict[str, EnergyState]]
     states: dict[str, EnergyState]
     availability_store: Store[dict[str, bool]]
     require_all_sources: dict[str, bool]
+    energy_recovery_callbacks: dict[str, Callable[[], bool]] = field(
+        default_factory=dict
+    )
 
     @callback
     def async_update(self, group_id: str, state: EnergyState) -> None:
@@ -39,9 +47,25 @@ class GroupStorage:
         self, group_id: str, require_all: bool
     ) -> None:
         """Apply and save the switch setting independently of meter checkpoints."""
+        self._async_apply_source_availability(group_id, require_all)
+        await self.async_save_availability()
+
+    @callback
+    def async_cycle_source_availability(self, group_id: str) -> None:
+        """Disable strict mode for one refresh and restore it before yielding."""
+        original_mode = self.require_all_sources[group_id]
+        try:
+            self._async_apply_source_availability(group_id, False)
+        finally:
+            self._async_apply_source_availability(group_id, original_mode)
+
+    @callback
+    def _async_apply_source_availability(
+        self, group_id: str, require_all: bool
+    ) -> None:
+        """Apply the switch setting in memory and refresh the group's entities."""
         self.require_all_sources[group_id] = require_all
         async_dispatcher_send(self.store.hass, availability_signal(group_id))
-        await self.async_save_availability()
 
     async def async_save_availability(self) -> None:
         """Flush settings before a reload or after a switch change."""
@@ -86,7 +110,9 @@ def _availability_store(
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ElectricGroupsEntry) -> bool:
-    """Load checkpoints and resolve each group's saved or initial setting."""
+    """Refresh translations and load each group's checkpoints and settings."""
+    async_invalidate_translations(hass, {DOMAIN})
+    await async_load_integrations(hass, {DOMAIN})
     store = _group_store(hass, entry)
     modes_store = _availability_store(hass, entry)
     saved = await store.async_load() or {}

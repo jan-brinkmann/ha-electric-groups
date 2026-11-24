@@ -9,6 +9,7 @@ NAME = "Electric Groups"
 
 GROUP_SUM = "sum"
 GROUP_DIFFERENCE = "difference"
+ISSUE_PENDING_ENERGY_REPORTS = "pending_energy_reports"
 
 CONF_DEVICES = "devices"
 CONF_ENERGY_ENTITIES = "energy_entities"

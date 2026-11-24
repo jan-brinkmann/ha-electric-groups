@@ -98,6 +98,26 @@
       }
     }
   },
+  "issues": {
+    "pending_energy_reports": {
+      "title": "Für {group} fehlen Energiemeldungen von {entities}.",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Energiesensor von {group} wiederherstellen",
+            "description": "Alle Energie-Entitäten sind wieder verfügbar. Für die folgenden steht jedoch noch eine neue Meldung des Zählerstands aus:\n\n{entities}\n\nÜberprüfe die angezeigten Energiewerte, bevor du auf Reparieren klickst. Die Reparatur übernimmt diese Zählerstände und macht somit die Energie-Entität der Gruppe {group_name} wieder verfügbar.\n\nWenn du den Dialog schließt, wartet der Gruppensensor weiter auf die ausstehenden Meldungen.",
+            "submit": "Reparieren"
+          }
+        },
+        "abort": {
+          "no_longer_applicable": "Die Reparatur ist für diese Gruppe inzwischen nicht mehr anwendbar."
+        },
+        "create_entry": {
+          "default": "Die Energie-Entität der Gruppe {group_name} ist wieder verfügbar."
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "energy": {

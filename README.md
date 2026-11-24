@@ -90,6 +90,10 @@ On each group's device page, look under **Configuration** for **Require all enti
 - **On (default for new groups).** If an energy or power entity is unavailable, the corresponding group sensor is also shown as unavailable. After an outage, the energy sensor waits until all energy entities are available again and each has then reported a reading. A repeated report with the same meter value counts.
 - **Off.** The group uses the available readings. When an energy meter reports again after an outage, the group tracks changes from its last valid reading. A sum group shows 0 W if all selected power sensors are unavailable. A difference group needs at least one available base power reading to show power.
 
+If all energy entities show valid readings again after an outage and some reports are still missing after one minute, the group appears under **Settings → Repairs**. After a restart, the wait begins once Home Assistant has finished starting and all energy entities are available again.
+
+Open the issue to see which energy entities have yet to report and follow links to their associated devices. Select **Repair** to use the current meter readings and restore the group energy sensor. This briefly turns **Require all entities** off and back on. If you close the dialog, the energy sensor keeps waiting for reports. You can reopen the issue later.
+
 ## Example for the Energy Dashboard
 
 For the power strip in the example above, the Energy Dashboard can use the individual sensors for the monitor and computer and the difference group's energy sensor for the remaining devices. Adding the upstream plug to the individual device totals would count the same consumption twice. If the meters report at different times, the difference group's reading can temporarily drop or go negative.

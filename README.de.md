@@ -90,6 +90,10 @@ Auf der Geräteseite jeder Gruppe findest du unter **Konfiguration** den Schalte
 - **Ein (Standard für neue Gruppen).** Ist eine Energie- oder Leistungsentität nicht verfügbar, wird der entsprechende Gruppensensor ebenfalls als nicht verfügbar angezeigt. Nach einem Ausfall zeigt der Energiesensor erst wieder einen Wert an, wenn alle Energieentitäten wieder verfügbar sind und danach jeweils einen Messwert gemeldet haben. Auch eine erneute Meldung mit demselben Zählerstand zählt.
 - **Aus.** Die Gruppe rechnet mit den verfügbaren Messwerten. Meldet ein Energiezähler nach einem Ausfall wieder einen Wert, zählt die Gruppe ab seinem letzten gültigen Stand weiter. Fallen alle ausgewählten Leistungssensoren einer Summengruppe aus, zeigt sie 0 W. Eine Differenzgruppe braucht mindestens einen verfügbaren Basis-Leistungswert, um die Leistung anzuzeigen.
 
+Wenn alle Energieentitäten nach einem Ausfall wieder gültige Werte anzeigen und nach einer Minute noch Meldungen fehlen, erscheint die Gruppe unter **Einstellungen → Reparaturen**. Nach einem Neustart beginnt diese Wartezeit frühestens, wenn Home Assistant vollständig gestartet ist.
+
+Der Dialog nennt die Energieentitäten, deren Meldungen noch fehlen, und verlinkt ihre Geräte, sofern sie in Home Assistant hinterlegt sind. Mit **Reparieren** übernimmt die Gruppe die aktuell angezeigten Zählerstände. Dabei wird **Alle Entitäten erforderlich** kurz ausgeschaltet und sofort wieder eingeschaltet. Wenn du den Dialog schließt, wartet der Energiesensor weiter auf die ausstehenden Meldungen. Du kannst den Eintrag später erneut öffnen.
+
 ## Beispiel für das Energie-Dashboard
 
 Für die Mehrfachsteckdose aus dem Beispiel oben lassen sich im Energie-Dashboard die Einzelsensoren für Monitor und Computer und der Energiesensor der Differenzgruppe für die übrigen Geräte verwenden. Ein zusätzlicher Eintrag der vorgeschalteten Zwischensteckdose unter den Einzelgeräten würde den Verbrauch doppelt zählen. Wenn die Zähler zu unterschiedlichen Zeiten melden, kann der Wert der Differenzgruppe vorübergehend sinken oder negativ werden.
