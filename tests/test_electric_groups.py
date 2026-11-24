@@ -343,24 +343,30 @@ async def test_existing_sum_group_gets_availability_switch(
 async def test_pending_energy_reports_repair(
     recorder_mock: Recorder, hass: HomeAssistant, group_type: str, total: float
 ) -> None:
-    """Allow inspection and cancellation before repairing on confirmation."""
+    """Confirm energy recovery without publishing an incomplete power reading."""
     assert await async_setup_component(hass, REPAIRS_DOMAIN, {})
     entry = await create_integration(hass)
     base, member = "sensor.main_energy", "sensor.load_energy"
+    base_power, member_power = "sensor.main_power", "sensor.load_power"
     idle = "sensor.idle_energy"
     load_device = register_meter_device(hass, "load", "load_energy")
     er.async_get(hass).async_update_entity(member, name="Meter [Office]")
     data = {
         CONF_NAME: "Office",
+        CONF_POWER_ENTITIES: [member_power],
         CONF_ENERGY_ENTITIES: [member, idle, base]
         if group_type == GROUP_SUM
         else [member, idle],
     }
     if group_type == GROUP_DIFFERENCE:
-        data[CONF_BASE_DEVICE] = register_meter_device(hass, "base", "main_energy")
+        data[CONF_BASE_DEVICE] = register_meter_device(
+            hass, "base", "main_energy", "main_power"
+        )
+        set_power(hass, base_power, 100)
     set_energy(hass, base, 100)
     set_energy(hass, member, 40)
     set_energy(hass, idle, 7)
+    set_power(hass, member_power, 30)
     result = await submit_group(hass, entry, group_type, data)
     assert result["type"] is FlowResultType.CREATE_ENTRY
 
@@ -368,7 +374,11 @@ async def test_pending_energy_reports_repair(
     issue_id = f"{ISSUE_PENDING_ENERGY_REPORTS}_{group_id}"
     issues = ir.async_get(hass)
     energy_id = "sensor.office_energy"
+    power_id = "sensor.office_power"
     switch_id = "switch.office_require_all_entities"
+    assert_value(hass, power_id, 30 if group_type == GROUP_SUM else 70)
+    set_power(hass, member_power, STATE_UNAVAILABLE)
+    assert_unavailable(hass, power_id)
 
     set_energy(hass, member, STATE_UNAVAILABLE)
     set_energy(hass, base, 103)
@@ -444,16 +454,13 @@ async def test_pending_energy_reports_repair(
         assert message == expected
     assert issues.async_get_issue(DOMAIN, issue_id) is None
     assert_value(hass, energy_id, total)
-    assert [
-        state.state
-        for event in events
-        if event.data["entity_id"] == switch_id
-        and (state := event.data["new_state"]) is not None
-    ] == [STATE_OFF, STATE_ON]
+    assert_unavailable(hass, power_id)
+    assert all(event.data["entity_id"] not in {power_id, switch_id} for event in events)
 
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     assert_value(hass, energy_id, total)
+    assert_unavailable(hass, power_id)
     switch = hass.states.get(switch_id)
     assert switch is not None and switch.state == STATE_ON
     set_energy(hass, member, STATE_UNAVAILABLE)

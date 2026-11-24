@@ -92,7 +92,7 @@ On each group's device page, look under **Configuration** for **Require all enti
 
 If all energy entities show valid readings again after an outage and some reports are still missing after one minute, the group appears under **Settings → Repairs**. After a restart, the wait begins once Home Assistant has finished starting and all energy entities are available again.
 
-Open the issue to see which energy entities have yet to report and follow links to their associated devices. Select **Repair** to use the current meter readings and restore the group energy sensor. This briefly turns **Require all entities** off and back on. If you close the dialog, the energy sensor keeps waiting for reports. You can reopen the issue later.
+Open the issue to see which energy entities have yet to report and follow links to their associated devices. Select **Repair** to use the current meter readings and restore the group energy sensor. If you close the dialog, the energy sensor keeps waiting for reports. You can reopen the issue later.
 
 ## Example for the Energy Dashboard
 

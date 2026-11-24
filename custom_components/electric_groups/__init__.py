@@ -47,25 +47,9 @@ class GroupStorage:
         self, group_id: str, require_all: bool
     ) -> None:
         """Apply and save the switch setting independently of meter checkpoints."""
-        self._async_apply_source_availability(group_id, require_all)
-        await self.async_save_availability()
-
-    @callback
-    def async_cycle_source_availability(self, group_id: str) -> None:
-        """Disable strict mode for one refresh and restore it before yielding."""
-        original_mode = self.require_all_sources[group_id]
-        try:
-            self._async_apply_source_availability(group_id, False)
-        finally:
-            self._async_apply_source_availability(group_id, original_mode)
-
-    @callback
-    def _async_apply_source_availability(
-        self, group_id: str, require_all: bool
-    ) -> None:
-        """Apply the switch setting in memory and refresh the group's entities."""
         self.require_all_sources[group_id] = require_all
         async_dispatcher_send(self.store.hass, availability_signal(group_id))
+        await self.async_save_availability()
 
     async def async_save_availability(self) -> None:
         """Flush settings before a reload or after a switch change."""

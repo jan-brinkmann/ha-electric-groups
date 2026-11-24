@@ -257,13 +257,11 @@ class GroupEnergySensor(GroupSensor):
     @callback
     def _async_resume_energy(self) -> bool:
         """Resume energy with current readings and return whether it is available."""
-        if not self._waiting_for_reports or any(
-            read_measurement(self._async_source_state(ref), SensorDeviceClass.ENERGY)
-            is None
-            for ref in self._weights
-        ):
+        if not self._waiting_for_reports:
             return False
-        self._storage.async_cycle_source_availability(self._group_id)
+        self._async_refresh(accept_current_readings=True)
+        if self.available:
+            self.async_write_ha_state()
         return self.available
 
     @callback
@@ -455,12 +453,17 @@ class GroupEnergySensor(GroupSensor):
 
     @callback
     def _async_refresh(
-        self, *, publish: bool = False, confirmed_entity_id: str | None = None
+        self,
+        *,
+        publish: bool = False,
+        confirmed_entity_id: str | None = None,
+        accept_current_readings: bool = False,
     ) -> None:
         """Track trusted meter deltas and wait for fresh readings in strict mode.
 
         Keep the last reliable reading for an unconfirmed source so a stale
         value after reconnecting cannot be mistaken for a meter reset.
+        Repair can accept current readings when every energy source is available.
         """
         if self._waiting_for_history:
             return
@@ -495,6 +498,7 @@ class GroupEnergySensor(GroupSensor):
             unavailable,
             require_all=require_all,
             confirmed_ref=confirmed_ref,
+            accept_current_readings=accept_current_readings,
         )
         for ref, (reading, increasing) in readings.items():
             if ref not in self._accumulator.pending_reports:

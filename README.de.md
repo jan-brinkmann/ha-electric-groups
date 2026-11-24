@@ -92,7 +92,7 @@ Auf der Geräteseite jeder Gruppe findest du unter **Konfiguration** den Schalte
 
 Wenn alle Energieentitäten nach einem Ausfall wieder gültige Werte anzeigen und nach einer Minute noch Meldungen fehlen, erscheint die Gruppe unter **Einstellungen → Reparaturen**. Nach einem Neustart beginnt diese Wartezeit frühestens, wenn Home Assistant vollständig gestartet ist.
 
-Der Dialog nennt die Energieentitäten, deren Meldungen noch fehlen, und verlinkt ihre Geräte, sofern sie in Home Assistant hinterlegt sind. Mit **Reparieren** übernimmt die Gruppe die aktuell angezeigten Zählerstände. Dabei wird **Alle Entitäten erforderlich** kurz ausgeschaltet und sofort wieder eingeschaltet. Wenn du den Dialog schließt, wartet der Energiesensor weiter auf die ausstehenden Meldungen. Du kannst den Eintrag später erneut öffnen.
+Der Dialog nennt die Energieentitäten, deren Meldungen noch fehlen, und verlinkt ihre Geräte, sofern sie in Home Assistant hinterlegt sind. Mit **Reparieren** übernimmt der Energiesensor der Gruppe einmalig die aktuell angezeigten Zählerstände. Wenn du den Dialog schließt, wartet der Energiesensor weiter auf die ausstehenden Meldungen. Du kannst den Eintrag später erneut öffnen.
 
 ## Beispiel für das Energie-Dashboard
 
