@@ -125,6 +125,44 @@
       },
       "power": {
         "name": "Power"
+      },
+      "energy_source_status": {
+        "name": "Energy source status",
+        "state": {
+          "complete": "All sources available",
+          "partial": "Measurement from some sources",
+          "missing_sources": "Required sources missing",
+          "no_readings": "No readings available",
+          "no_sources": "No sources configured",
+          "waiting_for_reports": "Waiting for new meter readings",
+          "importing_history": "Importing energy history",
+          "inactive": "Measurement sensor inactive"
+        },
+        "state_attributes": {
+          "total_sources": { "name": "Configured sources" },
+          "available_sources": { "name": "Available sources" },
+          "missing_sources": { "name": "Sources without a valid reading" },
+          "pending_reports": { "name": "Pending meter reports" },
+          "unresolved_sources": { "name": "Sources without a matching entity" }
+        }
+      },
+      "power_source_status": {
+        "name": "Power source status",
+        "state": {
+          "complete": "All sources available",
+          "partial": "Measurement from some sources",
+          "missing_sources": "Required sources missing",
+          "no_readings": "No readings available",
+          "no_sources": "No sources configured",
+          "missing_base": "No base power reading available",
+          "inactive": "Measurement sensor inactive"
+        },
+        "state_attributes": {
+          "total_sources": { "name": "Configured sources" },
+          "available_sources": { "name": "Available sources" },
+          "missing_sources": { "name": "Sources without a valid reading" },
+          "unresolved_sources": { "name": "Sources without a matching entity" }
+        }
       }
     },
     "switch": {

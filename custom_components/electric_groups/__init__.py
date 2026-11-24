@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
@@ -16,6 +17,7 @@ from homeassistant.helpers.translation import (
 
 from .const import CONF_REQUIRE_ALL_SOURCES_DEFAULT, DOMAIN, GROUP_DIFFERENCE, NAME
 from .energy import EnergyState
+from .source_status import SourceStatus
 
 _PLATFORMS = [Platform.SENSOR, Platform.SWITCH]
 _SAVE_DELAY = 10
@@ -23,13 +25,16 @@ _SAVE_DELAY = 10
 
 @dataclass
 class GroupStorage:
-    """Share meter checkpoints, availability settings, and live repair callbacks."""
+    """Share meter checkpoints, availability settings, and live diagnostics."""
 
     store: Store[dict[str, EnergyState]]
     states: dict[str, EnergyState]
     availability_store: Store[dict[str, bool]]
     require_all_sources: dict[str, bool]
     energy_recovery_callbacks: dict[str, Callable[[], bool]] = field(
+        default_factory=dict
+    )
+    source_statuses: dict[tuple[str, SensorDeviceClass], SourceStatus] = field(
         default_factory=dict
     )
 
@@ -55,6 +60,20 @@ class GroupStorage:
         """Flush settings before a reload or after a switch change."""
         await self.availability_store.async_save(self.require_all_sources.copy())
 
+    @callback
+    def async_set_source_status(
+        self, group_id: str, kind: SensorDeviceClass, status: SourceStatus | None
+    ) -> None:
+        """Notify the diagnostic entity when a measurement changes or unloads."""
+        key = group_id, kind
+        if self.source_statuses.get(key) == status:
+            return
+        if status is None:
+            del self.source_statuses[key]
+        else:
+            self.source_statuses[key] = status
+        async_dispatcher_send(self.store.hass, source_status_signal(group_id, kind))
+
 
 type ElectricGroupsEntry = ConfigEntry[GroupStorage]
 
@@ -62,6 +81,11 @@ type ElectricGroupsEntry = ConfigEntry[GroupStorage]
 def availability_signal(group_id: str) -> str:
     """Return the signal sent when the group's availability setting changes."""
     return f"{DOMAIN}_source_availability_{group_id}"
+
+
+def source_status_signal(group_id: str, kind: SensorDeviceClass) -> str:
+    """Return the signal for changes to one group measurement's source status."""
+    return f"{DOMAIN}_source_status_{group_id}_{kind}"
 
 
 def group_device_info(group: ConfigSubentry) -> DeviceInfo:

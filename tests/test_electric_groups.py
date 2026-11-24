@@ -26,6 +26,7 @@ from homeassistant.const import (
     STATE_OFF,
     STATE_ON,
     STATE_UNAVAILABLE,
+    EntityCategory,
     UnitOfEnergy,
     UnitOfPower,
 )
@@ -47,10 +48,15 @@ from pytest_homeassistant.common import (
     async_capture_events,
     async_fire_time_changed,
 )
+from pytest_homeassistant.components.diagnostics import (
+    get_diagnostics_for_config_entry,
+    get_diagnostics_for_device,
+)
 from pytest_homeassistant.components.recorder.common import (
     async_wait_recording_done,
     do_adhoc_statistics,
 )
+from pytest_homeassistant.typing import ClientSessionGenerator
 from sqlalchemy.exc import SQLAlchemyError
 
 from custom_components.electric_groups import sensor
@@ -374,6 +380,7 @@ async def test_pending_energy_reports_repair(
     issue_id = f"{ISSUE_PENDING_ENERGY_REPORTS}_{group_id}"
     issues = ir.async_get(hass)
     energy_id = "sensor.office_energy"
+    energy_status_id = "sensor.office_energy_source_status"
     power_id = "sensor.office_power"
     switch_id = "switch.office_require_all_entities"
     assert_value(hass, power_id, 30 if group_type == GROUP_SUM else 70)
@@ -383,11 +390,18 @@ async def test_pending_energy_reports_repair(
     set_energy(hass, member, STATE_UNAVAILABLE)
     set_energy(hass, base, 103)
     assert_unavailable(hass, energy_id)
+    status = hass.states.get(energy_status_id)
+    assert status is not None and status.state == "missing_sources"
+    assert status.attributes["missing_sources"] == [member]
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
     assert issues.async_get_issue(DOMAIN, issue_id) is None
 
     set_energy(hass, member, 41)
     assert_unavailable(hass, energy_id)
+    status = hass.states.get(energy_status_id)
+    assert status is not None and status.state == "waiting_for_reports"
+    assert status.attributes["available_sources"] == 3
+    assert status.attributes["pending_reports"] == [idle, member, base]
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=58))
     assert issues.async_get_issue(DOMAIN, issue_id) is None
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
@@ -399,6 +413,9 @@ async def test_pending_energy_reports_repair(
     }
 
     set_energy(hass, base, 103)
+    status = hass.states.get(energy_status_id)
+    assert status is not None and status.state == "waiting_for_reports"
+    assert status.attributes["pending_reports"] == [idle, member]
     updated_issue = issues.async_get_issue(DOMAIN, issue_id)
     assert updated_issue is not None and updated_issue.created == issue.created
     assert updated_issue.translation_placeholders == {
@@ -454,6 +471,9 @@ async def test_pending_energy_reports_repair(
         assert message == expected
     assert issues.async_get_issue(DOMAIN, issue_id) is None
     assert_value(hass, energy_id, total)
+    status = hass.states.get(energy_status_id)
+    assert status is not None and status.state == "complete"
+    assert "pending_reports" not in status.attributes
     assert_unavailable(hass, power_id)
     assert all(event.data["entity_id"] not in {power_id, switch_id} for event in events)
 
@@ -465,6 +485,80 @@ async def test_pending_energy_reports_repair(
     assert switch is not None and switch.state == STATE_ON
     set_energy(hass, member, STATE_UNAVAILABLE)
     assert_unavailable(hass, energy_id)
+
+
+async def test_source_status_diagnostics(
+    recorder_mock: Recorder, hass: HomeAssistant, hass_client: ClientSessionGenerator
+) -> None:
+    """Show partial and missing readings and export status for the entry and device."""
+    entry = await create_integration(hass)
+    first, second = "sensor.first_power", "sensor.second_power"
+    register_meter_device(hass, "second", "second_power")
+    set_power(hass, first, 30)
+    set_power(hass, second, STATE_UNAVAILABLE)
+    result = await submit_group(
+        hass,
+        entry,
+        GROUP_SUM,
+        {CONF_NAME: "Kitchen", CONF_POWER_ENTITIES: [first, second]},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    power = "sensor.kitchen_power"
+    status_id = "sensor.kitchen_power_source_status"
+    registry = er.async_get(hass)
+    status_entry = registry.async_get(status_id)
+    assert status_entry is not None
+    assert status_entry.entity_category is EntityCategory.DIAGNOSTIC
+    (group_id,) = entry.subentries
+    assert status_entry.config_subentry_id == group_id
+    assert status_entry.device_id is not None
+    device = dr.async_get(hass).async_get(status_entry.device_id)
+    assert device is not None and (DOMAIN, group_id) in device.identifiers
+
+    assert_unavailable(hass, power)
+    status = hass.states.get(status_id)
+    assert status is not None and status.state == "missing_sources"
+    assert status.attributes["missing_sources"] == [second]
+
+    await hass.services.async_call(
+        "switch",
+        "turn_off",
+        {"entity_id": "switch.kitchen_require_all_entities"},
+        blocking=True,
+    )
+    assert_value(hass, power, 30)
+    status = hass.states.get(status_id)
+    assert status is not None and status.state == "partial"
+    assert status.attributes["available_sources"] == 1
+    assert status.attributes["total_sources"] == 2
+
+    group_diagnostics = {
+        "group_type": GROUP_SUM,
+        "require_all_sources": False,
+        "power": {
+            "status": "partial",
+            "available_sources": 1,
+            "total_sources": 2,
+            "missing_sources": ["source_1"],
+        },
+        "energy": {"status": "no_sources", "available_sources": 0, "total_sources": 0},
+    }
+    assert await get_diagnostics_for_config_entry(hass, hass_client, entry) == {
+        "groups": [group_diagnostics]
+    }
+    assert await get_diagnostics_for_device(hass, hass_client, entry, device) == (
+        group_diagnostics
+    )
+
+    registry.async_remove(second)
+    set_power(hass, first, STATE_UNAVAILABLE)
+    assert_value(hass, power, 0)
+    status = hass.states.get(status_id)
+    assert status is not None and status.state == "no_readings"
+    assert status.attributes["available_sources"] == 0
+    assert status.attributes["missing_sources"] == [first]
+    assert status.attributes["unresolved_sources"] == 1
 
 
 async def test_reload_refreshes_cached_repair_translations(
@@ -630,6 +724,9 @@ async def test_difference_power_requires_available_base_reading(
     set_power(hass, "sensor.downstream_power", 40)
     state = hass.states.get(entity_id)
     assert state is not None and state.state == STATE_UNAVAILABLE
+    status = hass.states.get("sensor.remaining_power_source_status")
+    assert status is not None and status.state == "missing_base"
+    assert status.attributes["missing_sources"] == [auxiliary, main]
     set_power(hass, main, 180)
     assert_value(hass, entity_id, 130)
 
@@ -1030,6 +1127,8 @@ async def test_history_and_recorder_continuation(
     if interruption is not None:
         state = hass.states.get(entity_id)
         assert state is not None and state.state == STATE_UNAVAILABLE
+        status = hass.states.get("sensor.history_energy_source_status")
+        assert status is not None and status.state == "importing_history"
         if interruption == "before_commit":
             assert not await hass.async_add_executor_job(
                 statistics_during_period,
