@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
+from homeassistant.components.frontend import DATA_PANELS
 from homeassistant.components.recorder import Recorder
 from homeassistant.components.recorder.db_schema import Statistics, StatisticsShortTerm
 from homeassistant.components.recorder.models import (
@@ -56,7 +57,7 @@ from pytest_homeassistant.components.recorder.common import (
     async_wait_recording_done,
     do_adhoc_statistics,
 )
-from pytest_homeassistant.typing import ClientSessionGenerator
+from pytest_homeassistant.typing import ClientSessionGenerator, WebSocketGenerator
 from sqlalchemy.exc import SQLAlchemyError
 
 from custom_components.electric_groups import sensor
@@ -71,6 +72,7 @@ from custom_components.electric_groups.const import (
     GROUP_DIFFERENCE,
     GROUP_SUM,
     ISSUE_PENDING_ENERGY_REPORTS,
+    MEMBERS_PANEL_PATH,
 )
 from custom_components.electric_groups.statistics import History, write_history
 
@@ -268,6 +270,86 @@ async def test_sum_group_device_and_entity_selection(
     assert not registry.async_get(energy.entity_id)
     assert not registry.async_get(switch.entity_id)
     assert not devices.async_get(energy.device_id)
+
+
+async def test_group_members_page(
+    recorder_mock: Recorder,
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+    hass_ws_client: WebSocketGenerator,
+    hass_read_only_access_token: str,
+) -> None:
+    """Open a group's panel and resolve its current member links via WebSocket."""
+    assert await async_setup_component(hass, "websocket_api", {})
+    # The panel registers after Frontend starts, without needing its JS bundle here.
+    hass.config.components.add("frontend")
+    entry = await create_integration(hass)
+    devices = dr.async_get(hass)
+    base = register_meter_device(hass, "Main meter", "base_meter")
+    member = register_meter_device(hass, "Plug", "plug_meter", "plug_watts")
+    individual = register_meter_device(hass, "Computer", "computer_meter")
+    devices.async_update_device(member, name_by_user="Desk plug")
+    set_energy(hass, "sensor.base_meter", 15)
+    set_energy(hass, "sensor.plug_meter", 5)
+    set_energy(hass, "sensor.computer_meter", 2)
+    set_energy(hass, "sensor.standalone_meter", 1)
+    set_power(hass, "sensor.plug_watts", 20)
+    data = {
+        CONF_NAME: "Remaining",
+        CONF_BASE_DEVICE: base,
+        CONF_DEVICES: [member],
+        CONF_ENERGY_ENTITIES: [
+            "sensor.plug_meter",
+            "sensor.computer_meter",
+            "sensor.standalone_meter",
+        ],
+    }
+    result = await submit_group(hass, entry, GROUP_DIFFERENCE, data)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    (group_id,) = entry.subentries
+    group_device = devices.async_get_device_by_identifier(
+        (DOMAIN, group_id), entry.entry_id
+    )
+    assert group_device is not None
+    link = f"homeassistant://{MEMBERS_PANEL_PATH}/{group_id}"
+    assert group_device.configuration_url == link
+
+    panel = hass.data[DATA_PANELS][MEMBERS_PANEL_PATH]
+    assert panel.require_admin and panel.sidebar_title is None
+    client = await hass_client()
+    assert panel.config is not None
+    asset = await client.get(panel.config["_panel_custom"]["module_url"])
+    assert asset.status == 200
+    assert "electric-groups-members-panel" in await asset.text()
+
+    ws = await hass_ws_client()
+    command = {"type": f"{DOMAIN}/members", "group_id": group_id}
+    await ws.send_json_auto_id(command)
+    assert (await ws.receive_json())["result"] == {
+        "group": {"id": group_device.id, "name": "Remaining"},
+        "base": {"id": base, "name": "Main meter"},
+        "members": [
+            {"id": individual, "name": "Computer"},
+            {"id": member, "name": "Desk plug"},
+        ],
+        "entities": ["sensor.standalone_meter"],
+    }
+
+    readonly_ws = await hass_ws_client(access_token=hass_read_only_access_token)
+    await readonly_ws.send_json_auto_id(command)
+    assert (await readonly_ws.receive_json())["error"]["code"] == "unauthorized"
+
+    renamed = er.async_get(hass).async_update_entity(
+        "sensor.computer_meter", new_entity_id="sensor.renamed_computer_meter"
+    )
+    set_energy(hass, renamed.entity_id, 3)
+    await ws.send_json_auto_id(command)
+    assert (await ws.receive_json())["result"]["members"][0]["id"] == individual
+
+    assert hass.config_entries.async_remove_subentry(entry, group_id)
+    await hass.async_block_till_done()
+    await ws.send_json_auto_id(command)
+    assert (await ws.receive_json())["error"]["code"] == "not_found"
 
 
 async def test_existing_sum_group_gets_availability_switch(

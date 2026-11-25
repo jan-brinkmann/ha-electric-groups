@@ -67,6 +67,8 @@ When you save a group, it includes all enabled, compatible sensors from each sel
 
 A sum group sensor is unavailable if you select no entities for that measurement.
 
+The configuration link under **Device info** on the group device page opens the members overview. From there, you can open each member's device page. For difference groups, the overview shows the base device separately. Sensors without a device appear in their own list.
+
 ### Edit or remove a group
 
 Go to **Settings → Devices & services → Electric Groups** and open the menu next to the group. You can edit or remove the group there. When editing, you can change the name and the selected devices and sensors. For a difference group, you can also choose a different base device.

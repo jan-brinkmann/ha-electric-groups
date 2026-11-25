@@ -67,6 +67,8 @@ Wenn du ein Gerät als Mitglied auswählst, übernimmt die Gruppe beim Speichern
 
 Bei einer Summengruppe bleibt der Gruppensensor für eine Messgröße ohne ausgewählte Entitäten nicht verfügbar.
 
+Der Konfigurationslink unter **Geräteinformationen** auf der Geräteseite der Gruppe öffnet die Mitgliederübersicht. Von dort kommst du direkt zu den Geräteseiten der Mitglieder. Bei Differenzgruppen steht das Basisgerät separat. Sensoren ohne zugehöriges Gerät stehen in einer eigenen Liste.
+
 ### Gruppe bearbeiten oder entfernen
 
 Öffne unter **Einstellungen → Geräte & Dienste → Electric Groups** das Menü neben der Gruppe. Dort kannst du die Gruppe bearbeiten oder entfernen. Beim Bearbeiten kannst du den Namen und die Auswahl der Geräte und Sensoren ändern. Bei einer Differenzgruppe kannst du auch ein anderes Basisgerät wählen.
