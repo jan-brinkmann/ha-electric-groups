@@ -125,6 +125,44 @@
       },
       "power": {
         "name": "Leistung"
+      },
+      "energy_source_status": {
+        "name": "Status der Energiequellen",
+        "state": {
+          "complete": "Alle Quellen verfügbar",
+          "partial": "Messwert aus einem Teil der Quellen",
+          "missing_sources": "Erforderliche Quellen fehlen",
+          "no_readings": "Keine Messwerte verfügbar",
+          "no_sources": "Keine Quellen konfiguriert",
+          "waiting_for_reports": "Wartet auf neue Zählerstände",
+          "importing_history": "Energiehistorie wird übernommen",
+          "inactive": "Messsensor inaktiv"
+        },
+        "state_attributes": {
+          "total_sources": { "name": "Konfigurierte Quellen" },
+          "available_sources": { "name": "Verfügbare Quellen" },
+          "missing_sources": { "name": "Quellen ohne gültigen Messwert" },
+          "pending_reports": { "name": "Ausstehende Zählerstandsmeldungen" },
+          "unresolved_sources": { "name": "Quellen ohne zugehörige Entität" }
+        }
+      },
+      "power_source_status": {
+        "name": "Status der Leistungsquellen",
+        "state": {
+          "complete": "Alle Quellen verfügbar",
+          "partial": "Messwert aus einem Teil der Quellen",
+          "missing_sources": "Erforderliche Quellen fehlen",
+          "no_readings": "Keine Messwerte verfügbar",
+          "no_sources": "Keine Quellen konfiguriert",
+          "missing_base": "Kein Basis-Leistungswert verfügbar",
+          "inactive": "Messsensor inaktiv"
+        },
+        "state_attributes": {
+          "total_sources": { "name": "Konfigurierte Quellen" },
+          "available_sources": { "name": "Verfügbare Quellen" },
+          "missing_sources": { "name": "Quellen ohne gültigen Messwert" },
+          "unresolved_sources": { "name": "Quellen ohne zugehörige Entität" }
+        }
       }
     },
     "switch": {

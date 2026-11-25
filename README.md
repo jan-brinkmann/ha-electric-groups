@@ -67,6 +67,8 @@ When you save a group, it includes all enabled, compatible sensors from each sel
 
 A sum group sensor is unavailable if you select no entities for that measurement.
 
+The configuration link under **Device info** on the group device page opens the members overview. From there, you can open each member's device page. For difference groups, the overview shows the base device separately. Sensors without a device appear in their own list.
+
 ### Edit or remove a group
 
 Go to **Settings → Devices & services → Electric Groups** and open the menu next to the group. You can edit or remove the group there. When editing, you can change the name and the selected devices and sensors. For a difference group, you can also choose a different base device.
@@ -89,6 +91,8 @@ On each group's device page, look under **Configuration** for **Require all enti
 
 - **On (default for new groups).** If an energy or power entity is unavailable, the corresponding group sensor is also shown as unavailable. After an outage, the energy sensor waits until all energy entities are available again and each has then reported a reading. A repeated report with the same meter value counts.
 - **Off.** The group uses the available readings. When an energy meter reports again after an outage, the group tracks changes from its last valid reading. A sum group shows 0 W if all selected power sensors are unavailable. A difference group needs at least one available base power reading to show power.
+
+Under **Diagnostic** on the group device page, **Energy source status** and **Power source status** show whether all sources are reporting, only some are available, or the group is waiting for new energy readings. Open either status to see the number of available and configured sources and any entity IDs with missing readings or pending reports. The native diagnostics download includes the same status information with generic labels in place of source entity IDs in the integration data.
 
 If all energy entities show valid readings again after an outage and some reports are still missing after one minute, the group appears under **Settings → Repairs**. After a restart, the wait begins once Home Assistant has finished starting and all energy entities are available again.
 

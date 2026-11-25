@@ -2,9 +2,10 @@
 
 import logging
 from asyncio import Task
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from functools import partial
 from math import fsum
+from typing import Any
 
 from homeassistant.components.recorder import get_instance, is_entity_recorded
 from homeassistant.components.sensor import (
@@ -14,6 +15,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigSubentry
+from homeassistant.const import EntityCategory
 from homeassistant.core import (
     CoreState,
     Event,
@@ -38,7 +40,13 @@ from homeassistant.helpers.event import (
 from homeassistant.helpers.start import async_at_started
 from sqlalchemy.exc import SQLAlchemyError
 
-from . import ElectricGroupsEntry, GroupStorage, availability_signal, group_device_info
+from . import (
+    ElectricGroupsEntry,
+    GroupStorage,
+    availability_signal,
+    group_device_info,
+    source_status_signal,
+)
 from .const import (
     CONF_IMPORT_HISTORY,
     CONF_SOURCES,
@@ -48,6 +56,7 @@ from .const import (
     MEASUREMENTS,
 )
 from .energy import EnergyAccumulator
+from .source_status import SourceStatus, SourceStatusState
 from .sources import Reading, SourceWeights, read_measurement
 from .statistics import async_recorder_job, prepare_history, write_history
 
@@ -61,10 +70,10 @@ async def async_setup_entry(
     entry: ElectricGroupsEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up group sensors and remove power entities whose base has no power source."""
+    """Set up measurements and their diagnostics for every virtual group device."""
     for group in entry.subentries.values():
         device_info = group_device_info(group)
-        entities: list[GroupSensor] = [GroupEnergySensor(entry, group, device_info)]
+        entities: list[SensorEntity] = [GroupEnergySensor(entry, group, device_info)]
         power_sources = group.data[CONF_SOURCES][SensorDeviceClass.POWER]
         if group.subentry_type != GROUP_DIFFERENCE or any(
             weight > 0 for weight in power_sources.values()
@@ -80,7 +89,75 @@ async def async_setup_entry(
                 "sensor", entry.domain, f"{group.subentry_id}_{SensorDeviceClass.POWER}"
             ):
                 registry.async_remove(entity_id)
+        entities.extend(
+            GroupSourceStatusSensor(group, device_info, kind, entry.runtime_data)
+            for kind in MEASUREMENTS
+        )
         async_add_entities(entities, config_subentry_id=group.subentry_id)
+
+
+class GroupSourceStatusSensor(SensorEntity):
+    """Show why a measurement is partial or unavailable on the group device."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+
+    def __init__(
+        self,
+        group: ConfigSubentry,
+        device_info: DeviceInfo,
+        kind: SensorDeviceClass,
+        storage: GroupStorage,
+    ) -> None:
+        """Bind the status entity to one group measurement and its device."""
+        self._attr_device_info = device_info
+        self._attr_translation_key = f"{kind}_source_status"
+        self._attr_unique_id = f"{group.subentry_id}_{self._attr_translation_key}"
+        other_measurement_states = (
+            (SourceStatusState.MISSING_BASE,)
+            if kind == SensorDeviceClass.ENERGY
+            else (
+                SourceStatusState.WAITING_FOR_REPORTS,
+                SourceStatusState.IMPORTING_HISTORY,
+            )
+        )
+        self._attr_options = [
+            state.value
+            for state in SourceStatusState
+            if state not in other_measurement_states
+        ]
+        self._status_key = group.subentry_id, kind
+        self._storage = storage
+        self._default_status = SourceStatus.untracked(
+            len(group.data[CONF_SOURCES][kind])
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Publish status changes independently of the measurement entity."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                source_status_signal(*self._status_key),
+                self.async_write_ha_state,
+            )
+        )
+
+    @property
+    def native_value(self) -> str:
+        """Return the translated status key for the last source evaluation."""
+        return self._storage.source_statuses.get(
+            self._status_key, self._default_status
+        ).state.value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose counts and the entities that explain the source status."""
+        return self._storage.source_statuses.get(
+            self._status_key, self._default_status
+        ).attributes()
 
 
 class GroupSensor(SensorEntity):
@@ -89,6 +166,7 @@ class GroupSensor(SensorEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
     _attr_available = False
+    _attr_device_class: SensorDeviceClass
 
     def __init__(
         self,
@@ -111,7 +189,7 @@ class GroupSensor(SensorEntity):
         self._unsub_sources: list[Callable[[], None]] = []
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to the sources and shared switch before the initial reading."""
+        """Subscribe to inputs and publish the initial measurement and diagnostics."""
         await super().async_added_to_hass()
         self.async_on_remove(
             async_dispatcher_connect(
@@ -121,6 +199,14 @@ class GroupSensor(SensorEntity):
             )
         )
         self.async_on_remove(self._async_unsubscribe)
+        self.async_on_remove(
+            partial(
+                self._storage.async_set_source_status,
+                self._group_id,
+                self._attr_device_class,
+                None,
+            )
+        )
         self._async_subscribe()
         self._async_refresh()
 
@@ -193,6 +279,45 @@ class GroupSensor(SensorEntity):
         """Return the current state for a source, even if its registry ID changed."""
         entity_id = self._source_ids.get(ref)
         return self.hass.states.get(entity_id) if entity_id is not None else None
+
+    @callback
+    def _async_update_source_status(
+        self,
+        available: Collection[str],
+        *,
+        pending: Collection[str] = (),
+        state: SourceStatusState | None = None,
+    ) -> None:
+        """Describe source coverage and any measurement-specific blocking reason."""
+        missing = self._weights.keys() - available
+        missing_ids = tuple(
+            sorted(self._source_ids[ref] for ref in missing if ref in self._source_ids)
+        )
+        if state is None:
+            if not self._weights:
+                state = SourceStatusState.NO_SOURCES
+            elif not available:
+                state = SourceStatusState.NO_READINGS
+            elif not missing:
+                state = SourceStatusState.COMPLETE
+            elif self.available:
+                state = SourceStatusState.PARTIAL
+            else:
+                state = SourceStatusState.MISSING_SOURCES
+        self._storage.async_set_source_status(
+            self._group_id,
+            self._attr_device_class,
+            SourceStatus(
+                state=state,
+                total_sources=len(self._weights),
+                available_sources=len(available),
+                missing_sources=missing_ids,
+                pending_reports=tuple(
+                    sorted(self._source_ids[ref] for ref in pending if ref in available)
+                ),
+                unresolved_sources=len(missing) - len(missing_ids),
+            ),
+        )
 
 
 class GroupEnergySensor(GroupSensor):
@@ -364,8 +489,9 @@ class GroupEnergySensor(GroupSensor):
     def _async_source_update(
         self, entity_id: str, state: State | None, *, fresh: bool
     ) -> None:
-        """Refresh the group and confirm a source only after a valid repeat report."""
+        """Refresh diagnostics and confirm a source only after a valid repeat report."""
         if self._waiting_for_history:
+            self._async_refresh()
             return
         previous = self._attr_available, self._attr_native_value
         valid = read_measurement(state, SensorDeviceClass.ENERGY) is not None
@@ -464,9 +590,8 @@ class GroupEnergySensor(GroupSensor):
         Keep the last reliable reading for an unconfirmed source so a stale
         value after reconnecting cannot be mistaken for a meter reset.
         Repair can accept current readings when every energy source is available.
+        Publish diagnostics even while live energy is blocked by a history import.
         """
-        if self._waiting_for_history:
-            return
         readings: dict[str, tuple[Reading, bool]] = {}
         confirmed_ref = None
         for ref in self._weights:
@@ -487,6 +612,12 @@ class GroupEnergySensor(GroupSensor):
                 and self._source_ids.get(ref) == confirmed_entity_id
             ):
                 confirmed_ref = ref
+
+        if self._waiting_for_history:
+            self._async_update_source_status(
+                readings.keys(), state=SourceStatusState.IMPORTING_HISTORY
+            )
+            return
 
         unavailable = self._weights.keys() - readings.keys()
         require_all = self._require_all_sources
@@ -525,6 +656,15 @@ class GroupEnergySensor(GroupSensor):
 
         self._attr_available = bool(self._weights) and can_publish and value is not None
         self._attr_native_value = value if self._attr_available else None
+        self._async_update_source_status(
+            readings.keys(),
+            pending=self._accumulator.pending_reports,
+            state=(
+                SourceStatusState.WAITING_FOR_REPORTS
+                if self._waiting_for_reports
+                else None
+            ),
+        )
         self._async_update_repair(self.hass)
 
 
@@ -536,8 +676,8 @@ class GroupPowerSensor(GroupSensor):
 
     @callback
     def _async_refresh(self) -> None:
-        """Apply the availability setting while still requiring a difference base."""
-        values = []
+        """Sum usable readings and report any missing sources or difference base."""
+        values: dict[str, float] = {}
         has_base_reading = False
         for ref, weight in self._weights.items():
             reading = read_measurement(
@@ -546,8 +686,18 @@ class GroupPowerSensor(GroupSensor):
             if reading is None:
                 continue
             has_base_reading |= weight > 0
-            values.append(weight * reading.value)
+            values[ref] = weight * reading.value
         self._attr_available = (
             has_base_reading if self._is_difference else bool(self._weights)
         ) and (not self._require_all_sources or len(values) == len(self._weights))
-        self._attr_native_value = fsum(values) if self._attr_available else None
+        self._attr_native_value = (
+            fsum(values.values()) if self._attr_available else None
+        )
+        self._async_update_source_status(
+            values.keys(),
+            state=(
+                SourceStatusState.MISSING_BASE
+                if self._is_difference and not has_base_reading
+                else None
+            ),
+        )

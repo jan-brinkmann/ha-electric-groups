@@ -67,6 +67,8 @@ Wenn du ein Gerät als Mitglied auswählst, übernimmt die Gruppe beim Speichern
 
 Bei einer Summengruppe bleibt der Gruppensensor für eine Messgröße ohne ausgewählte Entitäten nicht verfügbar.
 
+Der Konfigurationslink unter **Geräteinformationen** auf der Geräteseite der Gruppe öffnet die Mitgliederübersicht. Von dort kommst du direkt zu den Geräteseiten der Mitglieder. Bei Differenzgruppen steht das Basisgerät separat. Sensoren ohne zugehöriges Gerät stehen in einer eigenen Liste.
+
 ### Gruppe bearbeiten oder entfernen
 
 Öffne unter **Einstellungen → Geräte & Dienste → Electric Groups** das Menü neben der Gruppe. Dort kannst du die Gruppe bearbeiten oder entfernen. Beim Bearbeiten kannst du den Namen und die Auswahl der Geräte und Sensoren ändern. Bei einer Differenzgruppe kannst du auch ein anderes Basisgerät wählen.
@@ -89,6 +91,8 @@ Auf der Geräteseite jeder Gruppe findest du unter **Konfiguration** den Schalte
 
 - **Ein (Standard für neue Gruppen).** Ist eine Energie- oder Leistungsentität nicht verfügbar, wird der entsprechende Gruppensensor ebenfalls als nicht verfügbar angezeigt. Nach einem Ausfall zeigt der Energiesensor erst wieder einen Wert an, wenn alle Energieentitäten wieder verfügbar sind und danach jeweils einen Messwert gemeldet haben. Auch eine erneute Meldung mit demselben Zählerstand zählt.
 - **Aus.** Die Gruppe rechnet mit den verfügbaren Messwerten. Meldet ein Energiezähler nach einem Ausfall wieder einen Wert, zählt die Gruppe ab seinem letzten gültigen Stand weiter. Fallen alle ausgewählten Leistungssensoren einer Summengruppe aus, zeigt sie 0 W. Eine Differenzgruppe braucht mindestens einen verfügbaren Basis-Leistungswert, um die Leistung anzuzeigen.
+
+Unter **Diagnose** auf der Geräteseite zeigen **Status der Energiequellen** und **Status der Leistungsquellen**, ob alle Quellen Messwerte liefern, nur ein Teil verfügbar ist oder die Gruppe auf neue Zählerstände wartet. In den Details stehen die Anzahl verfügbarer und konfigurierter Quellen sowie die Entitäts-IDs der Quellen mit fehlenden Messwerten oder ausstehenden Meldungen. Der Diagnosedownload enthält dieselben Statusangaben. Im Teil mit den Integrationsdaten stehen neutrale Bezeichnungen anstelle der Entitäts-IDs.
 
 Wenn alle Energieentitäten nach einem Ausfall wieder gültige Werte anzeigen und nach einer Minute noch Meldungen fehlen, erscheint die Gruppe unter **Einstellungen → Reparaturen**. Nach einem Neustart beginnt diese Wartezeit frühestens, wenn Home Assistant vollständig gestartet ist.
 

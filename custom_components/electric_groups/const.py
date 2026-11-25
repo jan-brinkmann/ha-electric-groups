@@ -6,6 +6,7 @@ from homeassistant.util.unit_conversion import EnergyConverter, PowerConverter
 
 DOMAIN = "electric_groups"
 NAME = "Electric Groups"
+MEMBERS_PANEL_PATH = "electric-groups-members"
 
 GROUP_SUM = "sum"
 GROUP_DIFFERENCE = "difference"
